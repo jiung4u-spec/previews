@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#1F3A5F">
+<link rel="manifest" href="manifest.webmanifest">
+<title>실버 말하기 시제품</title>
+<style>
+  :root { --bg:#ffffff; --fg:#111; --accent:#1F3A5F; --ok:#1b7f3b; --warn:#b4541b; --muted:#555; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#f4f4f4; --accent:#8fb3e8; --muted:#bbb; } }
+  html, body { margin:0; background:var(--bg); color:var(--fg); font-family:"맑은 고딕","Malgun Gothic","Noto Sans KR",sans-serif; font-size:24px; line-height:1.5; }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:28px; margin:8px 0 16px; color:var(--accent); }
+  #talk { display:block; width:100%; min-height:140px; font-size:40px; font-weight:700; color:#fff; background:var(--accent); border:0; border-radius:24px; cursor:pointer; }
+  #talk[aria-pressed="true"] { background:#b4541b; }
+  #talk:disabled { opacity:.5; }
+  .box { border:3px solid var(--accent); border-radius:16px; padding:16px; margin:16px 0; min-height:72px; }
+  .box .label { font-size:18px; color:var(--muted); display:block; }
+  #heard { font-size:32px; font-weight:700; }
+  #answer { font-size:32px; }
+  .status { font-size:20px; color:var(--muted); min-height:1.5em; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row button, .row a { flex:1 1 45%; font-size:22px; padding:16px; border-radius:14px; border:2px solid var(--accent); background:transparent; color:var(--fg); text-align:center; text-decoration:none; }
+  details { margin-top:24px; font-size:18px; }
+  table { border-collapse:collapse; width:100%; font-size:16px; }
+  th, td { border:1px solid #999; padding:6px; text-align:left; }
+  code { font-size:15px; }
+  label.small { font-size:18px; display:block; margin-top:12px; }
+  input[type=text] { font-size:18px; width:100%; padding:8px; box-sizing:border-box; }
+</style>
+</head>
+<body>
+<main>
+  <h1>실버 말하기 시제품 (0단계)</h1>
+
+  <button id="talk" aria-pressed="false">눌러서 말하기</button>
+  <div class="status" id="status">버튼을 누르고 말씀해 주세요.</div>
+
+  <div class="box"><span class="label">들은 말</span><div id="heard">—</div></div>
+  <div class="box"><span class="label">대답</span><div id="answer">—</div></div>
+
+  <div class="row">
+    <button id="repeat">다시 읽어 주기</button>
+    <button id="stopTts">읽기 멈춤</button>
+  </div>
+
+  <h2 style="font-size:22px;margin-top:28px">길 안내 열기 테스트 (서울 마포구 연세한강병원 좌표)</h2>
+  <div class="row">
+    <a id="nmapLink" href="#">네이버 지도 대중교통</a>
+    <a id="kakaoLink" href="#">카카오맵 대중교통</a>
+    <a id="geoLink" href="#">기본 지도 앱(geo:)</a>
+    <a id="telLink" href="tel:16443099">전화 걸기 화면 열기</a>
+  </div>
+
+  <details>
+    <summary>진단 정보 (개발용)</summary>
+    <label class="small">서버 주소 (비우면 서버 없이 되풀이 대답)
+      <input type="text" id="server" placeholder="예: http://192.168.0.10:8787">
+    </label>
+    <p id="diag"></p>
+    <table id="log"><thead><tr><th>#</th><th>말하기 시작→인식 끝</th><th>인식 끝→대답 준비</th><th>대답 준비→읽기 시작</th><th>읽기 길이</th><th>합계(버튼→읽기 끝)</th></tr></thead><tbody></tbody></table>
+  </details>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const talk = $('talk'), status = $('status'), heard = $('heard'), answer = $('answer');
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const synth = window.speechSynthesis;
+  let rec = null, listening = false, t = {}, n = 0, lastAnswer = '';
+
+  // ---------- 진단 ----------
+  function voicesKo() { return (synth ? synth.getVoices() : []).filter(v => /^ko/i.test(v.lang)); }
+  async function diag() {
+    const lines = [];
+    lines.push('보안 컨텍스트(https/localhost): ' + (window.isSecureContext ? '예' : '아니오 — 마이크 사용 불가'));
+    lines.push('음성 인식 객체: ' + (SR ? '있음' : '없음'));
+    if (SR && typeof SR.available === 'function') {
+      try {
+        const cloud = await SR.available({ langs: ['ko-KR'] });
+        const local = await SR.available({ langs: ['ko-KR'], processLocally: true });
+        lines.push('ko-KR 인식 가능(available): 일반=' + cloud + ', 기기 내=' + local);
+      } catch (e) { lines.push('available() 오류: ' + e.message); }
+    } else lines.push('available() 미지원(구형 Chrome) — 실제 start()로만 확인 가능');
+    lines.push('음성 합성 객체: ' + (synth ? '있음' : '없음'));
+    const vk = voicesKo();
+    lines.push('한국어 목소리 ' + vk.length + '개: ' + vk.map(v => v.name + (v.localService ? '(기기)' : '(온라인)')).join(', '));
+    lines.push('UA: ' + navigator.userAgent);
+    $('diag').innerText = lines.join('\n');
+  }
+  if (synth) { synth.onvoiceschanged = diag; }
+  diag();
+
+  // ---------- 말하기 ----------
+  function speak(text) {
+    return new Promise((resolve) => {
+      if (!synth) { resolve(); return; }
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'ko-KR'; u.rate = 0.9; u.pitch = 1.0;
+      const v = voicesKo()[0]; if (v) u.voice = v;
+      u.onstart = () => { t.ttsStart = performance.now(); };
+      u.onend = () => { t.ttsEnd = performance.now(); resolve(); };
+      u.onerror = () => { t.ttsEnd = performance.now(); resolve(); };
+      synth.speak(u);
+    });
+  }
+
+  // ---------- 대답 만들기 ----------
+  async function getAnswer(text) {
+    const url = $('server').value.trim();
+    if (url) {
+      try {
+        const r = await fetch(url.replace(/\/$/, '') + '/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+        const j = await r.json();
+        return j.answer || '(서버 대답 없음)';
+      } catch (e) { return '서버에 연결하지 못했어요. 다시 한 번 말씀해 주세요.'; }
+    }
+    // 서버 없이: 되풀이 확인 (왕복 시간 측정용)
+    if (/병원|의원|정형외과|내과|치과|안과/.test(text)) return `"${text}" 라고 들었어요. 가까운 병원을 찾아 드릴까요? 네, 아니오로 말씀해 주세요.`;
+    if (/식당|밥|맛집|점심|저녁/.test(text)) return `"${text}" 라고 들었어요. 근처 식당을 찾아 드릴까요? 네, 아니오로 말씀해 주세요.`;
+    if (/^네|^예|^응|맞아/.test(text)) return '알겠어요. 지금 찾아볼게요.';
+    return `"${text}" 라고 들었어요. 맞으면 "네"라고 말씀해 주세요.`;
+  }
+
+  // ---------- 왕복 ----------
+  function logRow() {
+    const tb = $('log').querySelector('tbody');
+    const tr = document.createElement('tr');
+    const ms = (a, b) => (a && b) ? Math.round(b - a) + ' ms' : '-';
+    tr.innerHTML = `<td>${++n}</td><td>${ms(t.press, t.recEnd)}</td><td>${ms(t.recEnd, t.answerReady)}</td><td>${ms(t.answerReady, t.ttsStart)}</td><td>${ms(t.ttsStart, t.ttsEnd)}</td><td>${ms(t.press, t.ttsEnd)}</td>`;
+    tb.prepend(tr);
+  }
+
+  function startListening() {
+    if (!SR) { status.textContent = '이 브라우저는 음성 인식을 지원하지 않아요.'; return; }
+    synth && synth.cancel();
+    t = { press: performance.now() };
+    rec = new SR();
+    rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    let finalText = '';
+    rec.onstart = () => { listening = true; talk.setAttribute('aria-pressed', 'true'); talk.textContent = '듣고 있어요… (다시 누르면 끝)'; status.textContent = '말씀하세요.'; heard.textContent = '…'; };
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
+      }
+      heard.textContent = finalText || interim || '…';
+    };
+    rec.onerror = (e) => { status.textContent = '인식 오류: ' + e.error + (e.error === 'not-allowed' ? ' (마이크 권한을 허용해 주세요)' : e.error === 'network' ? ' (인터넷 연결 또는 이 브라우저의 음성 서버 미지원)' : ''); };
+    rec.onend = async () => {
+      listening = false; talk.setAttribute('aria-pressed', 'false'); talk.textContent = '눌러서 말하기';
+      t.recEnd = performance.now();
+      const text = (finalText || heard.textContent || '').trim();
+      if (!text || text === '…') { status.textContent = '잘 못 들었어요. 다시 눌러 말씀해 주세요.'; return; }
+      status.textContent = '생각하는 중…';
+      const a = await getAnswer(text);
+      t.answerReady = performance.now();
+      lastAnswer = a; answer.textContent = a; status.textContent = '읽어 드릴게요.';
+      await speak(a);
+      status.textContent = '끝. 다시 말씀하시려면 버튼을 누르세요.';
+      logRow();
+    };
+    try { rec.start(); } catch (e) { status.textContent = '시작 실패: ' + e.message; }
+  }
+
+  talk.addEventListener('click', () => { if (listening) { rec && rec.stop(); } else startListening(); });
+  $('repeat').addEventListener('click', () => { if (lastAnswer) speak(lastAnswer); });
+  $('stopTts').addEventListener('click', () => synth && synth.cancel());
+
+  // ---------- 지도 딥링크 ----------
+  const lat = 37.5389, lng = 126.9456, name = encodeURIComponent('연세한강병원');
+  const appname = encodeURIComponent(location.origin || 'asidesilver');
+  const nmap = `nmap://route/public?dlat=${lat}&dlng=${lng}&dname=${name}&appname=${appname}`;
+  const nmapIntent = `intent://route/public?dlat=${lat}&dlng=${lng}&dname=${name}&appname=${appname}#Intent;scheme=nmap;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;package=com.nhn.android.nmap;end`;
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  $('nmapLink').href = isAndroid ? nmapIntent : nmap;
+  $('kakaoLink').href = `kakaomap://route?ep=${lat},${lng}&by=PUBLICTRANSIT`;
+  $('kakaoLink').addEventListener('click', () => { setTimeout(() => { if (!document.hidden) location.href = `https://m.map.kakao.com/scheme/route?ep=${lat},${lng}&by=PUBLICTRANSIT`; }, 1500); });
+  $('geoLink').href = `geo:${lat},${lng}?q=${lat},${lng}(${name})`;
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>

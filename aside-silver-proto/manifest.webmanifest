@@ -1,0 +1,12 @@
+{
+  "name": "실버 말하기 시제품",
+  "short_name": "실버 말하기",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1F3A5F",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
