@@ -32,7 +32,7 @@
 </head>
 <body>
 <main>
-  <h1>실버 말하기 시제품 (0단계)</h1>
+  <h1>실버 말하기</h1>
 
   <button id="talk" aria-pressed="false">눌러서 말하기</button>
   <div class="status" id="status">버튼을 누르고 말씀해 주세요.</div>
@@ -45,7 +45,8 @@
     <button id="stopTts">읽기 멈춤</button>
   </div>
 
-  <h2 style="font-size:22px;margin-top:28px">길 안내 열기 테스트 (서울 마포구 연세한강병원 좌표)</h2>
+  <h2 style="font-size:22px;margin:28px 0 4px">길 안내 열기 테스트</h2>
+  <div class="status" style="margin-bottom:8px">서울 마포구 연세한강병원 좌표로 엽니다.</div>
   <div class="row">
     <a id="nmapLink" href="#">네이버 지도 대중교통</a>
     <a id="kakaoLink" href="#">카카오맵 대중교통</a>
@@ -53,13 +54,16 @@
     <a id="telLink" href="tel:16443099">전화 걸기 화면 열기</a>
   </div>
 
+  <h2 style="font-size:22px;margin:28px 0 4px">왕복 시간표</h2>
+  <div class="status" style="margin-bottom:8px">말할 때마다 한 줄씩 쌓이고, 이 폰에 저장됩니다. <button id="clearLog" style="font-size:16px;padding:4px 10px;border-radius:8px;border:1px solid #999;background:transparent;color:inherit">표 지우기</button></div>
+  <table id="log"><thead><tr><th>#</th><th>말하기 시작→인식 끝</th><th>인식 끝→대답 준비</th><th>대답 준비→읽기 시작</th><th>읽기 길이</th><th>합계(버튼→읽기 끝)</th></tr></thead><tbody></tbody></table>
+
   <details>
     <summary>진단 정보 (개발용)</summary>
     <label class="small">서버 주소 (비우면 서버 없이 되풀이 대답)
       <input type="text" id="server" placeholder="예: http://192.168.0.10:8787">
     </label>
     <p id="diag"></p>
-    <table id="log"><thead><tr><th>#</th><th>말하기 시작→인식 끝</th><th>인식 끝→대답 준비</th><th>대답 준비→읽기 시작</th><th>읽기 길이</th><th>합계(버튼→읽기 끝)</th></tr></thead><tbody></tbody></table>
   </details>
 </main>
 
@@ -126,13 +130,27 @@
   }
 
   // ---------- 왕복 ----------
+  const LOG_KEY = 'silver-proto-log-v1';
+  function loadLog() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+      const tb = $('log').querySelector('tbody');
+      tb.innerHTML = '';
+      rows.forEach((cells) => { const tr = document.createElement('tr'); tr.innerHTML = cells.map((c) => `<td>${c}</td>`).join(''); tb.prepend(tr); });
+      n = rows.length;
+    } catch (e) {}
+  }
   function logRow() {
     const tb = $('log').querySelector('tbody');
     const tr = document.createElement('tr');
     const ms = (a, b) => (a && b) ? Math.round(b - a) + ' ms' : '-';
-    tr.innerHTML = `<td>${++n}</td><td>${ms(t.press, t.recEnd)}</td><td>${ms(t.recEnd, t.answerReady)}</td><td>${ms(t.answerReady, t.ttsStart)}</td><td>${ms(t.ttsStart, t.ttsEnd)}</td><td>${ms(t.press, t.ttsEnd)}</td>`;
+    const cells = [String(++n), ms(t.press, t.recEnd), ms(t.recEnd, t.answerReady), ms(t.answerReady, t.ttsStart), ms(t.ttsStart, t.ttsEnd), ms(t.press, t.ttsEnd)];
+    tr.innerHTML = cells.map((c) => `<td>${c}</td>`).join('');
     tb.prepend(tr);
+    try { const rows = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); rows.push(cells); localStorage.setItem(LOG_KEY, JSON.stringify(rows)); } catch (e) {}
   }
+  $('clearLog').addEventListener('click', () => { try { localStorage.removeItem(LOG_KEY); } catch (e) {} $('log').querySelector('tbody').innerHTML = ''; n = 0; });
+  loadLog();
 
   function startListening() {
     if (!SR) { status.textContent = '이 브라우저는 음성 인식을 지원하지 않아요.'; return; }
